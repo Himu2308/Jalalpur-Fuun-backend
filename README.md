@@ -18,7 +18,11 @@ Three separate kinds of session, all JWT + Redis-backed (see "Sessions" below):
 - **Workers** log in with just a UID, no password (`POST /auth/worker-login`) — a worker's UID and assigned activity (`role`, a game key) are created by an admin via `POST /staff`. A worker can only scan tickets for their assigned game.
 - **Admin** is a single shared password (`ADMIN_PASSWORD` env var, `POST /auth/admin-login`) — there are no individual admin accounts. Admin can create/list workers, force-logout a worker's sessions, scan and validate a ticket for *any* game, and see the recent scan log.
 
-Because admin has no per-person identity, a ticket scanned via the admin session records `scanned_by_staff_id = NULL` (shown as "Admin" in the scan log) — every other scan is attributed to a specific worker's UID.
+Because admin has no per-person identity, a ticket scanned via the admin session records a `NULL` worker UID (shown as "Admin" in the scan log) — every other scan is attributed to a specific worker's UID.
+
+## Scan log
+
+Every successful scan writes a permanent row to `scan_logs` (`backend/migrations/005_scan_logs.sql`), independent of the ticket's own `status` column — so the audit trail survives even if a ticket's state changes later. Each row denormalizes the facts as they were *at scan time*: the activity name, the worker's UID (or `NULL` for an admin scan), and the customer's name/phone/email — so the log stays accurate even if the game is renamed or the customer updates their phone later. `GET /staff/scans` reads straight from this table.
 
 ## Sessions
 

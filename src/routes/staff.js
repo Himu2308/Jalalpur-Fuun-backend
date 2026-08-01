@@ -35,16 +35,12 @@ router.post('/:id/revoke', requireAdmin, async (req, res) => {
   res.json({ ok: true });
 });
 
-// Recent scan activity — which worker scanned which ticket, for the audit trail
+// Recent scan activity — permanent audit trail, independent of the ticket's current status
 router.get('/scans', requireAdmin, async (req, res) => {
   const result = await query(
-    `SELECT t.id, t.scanned_at, g.name AS game_name, s.uid AS staff_uid, s.name AS staff_name
-     FROM tickets t
-     JOIN booking_items bi ON bi.id = t.booking_item_id
-     JOIN games g ON g.id = bi.game_id
-     LEFT JOIN staff s ON s.id = t.scanned_by_staff_id
-     WHERE t.status = 'used'
-     ORDER BY t.scanned_at DESC
+    `SELECT id, game_name, scanned_by_uid, customer_name, customer_phone, customer_email, scanned_at
+     FROM scan_logs
+     ORDER BY scanned_at DESC
      LIMIT 100`
   );
   res.json({ scans: result.rows });
