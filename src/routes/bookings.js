@@ -6,15 +6,25 @@ const { createOrder, verifyPayment } = require('../lib/razorpay');
 
 const router = express.Router();
 
-// Create a booking (multi-game cart) for today's visit date, and a Razorpay order to pay for it
+function variantLabel(mode, laps) {
+  if (!mode) return null;
+  const modeLabel = mode.charAt(0).toUpperCase() + mode.slice(1);
+  return `${modeLabel} · ${laps} Laps`;
+}
+
+// Create a booking (multi-game, multi-variant cart) for today's visit date, and a Razorpay order to pay for it
 router.post('/', requireUser, async (req, res) => {
-  const { items } = req.body; // [{ gameKey, quantity }]
+  const { items } = req.body; // [{ gameKey, variantId?, quantity }]
   if (!Array.isArray(items) || items.length === 0) {
     return res.status(400).json({ error: 'items must be a non-empty array' });
   }
 
   const gamesResult = await query('SELECT id, key, price_per_person FROM games WHERE is_active = true');
   const gamesByKey = Object.fromEntries(gamesResult.rows.map((g) => [g.key, g]));
+
+  const variantsResult = await query('SELECT id, game_id, price_per_person FROM game_variants WHERE is_active = true');
+  const variantsById = Object.fromEntries(variantsResult.rows.map((v) => [String(v.id), v]));
+  const gameHasVariants = new Set(variantsResult.rows.map((v) => v.game_id));
 
   let total = 0;
   const resolvedItems = [];
@@ -24,8 +34,22 @@ router.post('/', requireUser, async (req, res) => {
     if (!game || !Number.isInteger(quantity) || quantity <= 0) {
       return res.status(400).json({ error: `Invalid item for gameKey ${item.gameKey}` });
     }
-    total += Number(game.price_per_person) * quantity;
-    resolvedItems.push({ gameId: game.id, quantity });
+
+    let pricePerPerson;
+    let variantId = null;
+    if (gameHasVariants.has(game.id)) {
+      const variant = item.variantId != null ? variantsById[String(item.variantId)] : null;
+      if (!variant || variant.game_id !== game.id) {
+        return res.status(400).json({ error: `A valid variantId is required for ${item.gameKey}` });
+      }
+      variantId = variant.id;
+      pricePerPerson = Number(variant.price_per_person);
+    } else {
+      pricePerPerson = Number(game.price_per_person);
+    }
+
+    total += pricePerPerson * quantity;
+    resolvedItems.push({ gameId: game.id, variantId, quantity });
   }
 
   const bookingResult = await query(
@@ -37,8 +61,8 @@ router.post('/', requireUser, async (req, res) => {
 
   for (const item of resolvedItems) {
     await query(
-      'INSERT INTO booking_items (booking_id, game_id, quantity) VALUES ($1, $2, $3)',
-      [bookingId, item.gameId, item.quantity]
+      'INSERT INTO booking_items (booking_id, game_id, game_variant_id, quantity) VALUES ($1, $2, $3, $4)',
+      [bookingId, item.gameId, item.variantId, item.quantity]
     );
   }
 
@@ -54,7 +78,7 @@ router.post('/', requireUser, async (req, res) => {
   });
 });
 
-// Verify payment, mark booking paid, and generate one QR ticket per person per game
+// Verify payment, mark booking paid, and generate one QR ticket per person per booking line
 router.post('/:id/verify-payment', requireUser, async (req, res) => {
   const bookingId = req.params.id;
   const { razorpayOrderId, razorpayPaymentId, razorpaySignature } = req.body;
@@ -85,15 +109,18 @@ router.post('/:id/verify-payment', requireUser, async (req, res) => {
   );
 
   const itemsResult = await query(
-    `SELECT bi.id AS booking_item_id, bi.quantity, g.key AS game_key, g.name AS game_name
-     FROM booking_items bi JOIN games g ON g.id = bi.game_id
+    `SELECT bi.id AS booking_item_id, bi.quantity, g.key AS game_key, g.name AS game_name, g.image_url,
+            gv.mode, gv.laps
+     FROM booking_items bi
+     JOIN games g ON g.id = bi.game_id
+     LEFT JOIN game_variants gv ON gv.id = bi.game_variant_id
      WHERE bi.booking_id = $1`,
     [bookingId]
   );
 
-  const ticketsByGame = [];
+  const items = [];
   for (const item of itemsResult.rows) {
-    const gameTickets = [];
+    const tickets = [];
     for (let i = 0; i < item.quantity; i += 1) {
       const qrToken = nanoid(24);
       const ticketResult = await query(
@@ -101,15 +128,22 @@ router.post('/:id/verify-payment', requireUser, async (req, res) => {
          VALUES ($1, $2, $3, 'unused') RETURNING id, qr_token`,
         [item.booking_item_id, qrToken, booking.visit_date]
       );
-      gameTickets.push(ticketResult.rows[0]);
+      tickets.push(ticketResult.rows[0]);
     }
-    ticketsByGame.push({ gameKey: item.game_key, gameName: item.game_name, tickets: gameTickets });
+    items.push({
+      bookingItemId: item.booking_item_id,
+      gameKey: item.game_key,
+      gameName: item.game_name,
+      imageUrl: item.image_url,
+      variantLabel: variantLabel(item.mode, item.laps),
+      tickets,
+    });
   }
 
-  res.json({ bookingId, ticketsByGame });
+  res.json({ bookingId, items });
 });
 
-// List the logged-in user's bookings with their tickets, for a "my tickets" page
+// List the logged-in user's bookings with their tickets, for a "my bookings" page
 router.get('/mine', requireUser, async (req, res) => {
   const bookingsResult = await query(
     "SELECT id, visit_date, total_amount, status, created_at FROM bookings WHERE user_id = $1 ORDER BY created_at DESC",
@@ -119,23 +153,32 @@ router.get('/mine', requireUser, async (req, res) => {
   const bookings = [];
   for (const booking of bookingsResult.rows) {
     const itemsResult = await query(
-      `SELECT bi.id AS booking_item_id, g.key AS game_key, g.name AS game_name,
+      `SELECT bi.id AS booking_item_id, g.key AS game_key, g.name AS game_name, g.image_url,
+              gv.mode, gv.laps,
               t.id AS ticket_id, t.qr_token, t.status AS ticket_status
        FROM booking_items bi
        JOIN games g ON g.id = bi.game_id
+       LEFT JOIN game_variants gv ON gv.id = bi.game_variant_id
        LEFT JOIN tickets t ON t.booking_item_id = bi.id
        WHERE bi.booking_id = $1
-       ORDER BY g.name, t.id`,
+       ORDER BY bi.id, t.id`,
       [booking.id]
     );
 
-    const gamesMap = new Map();
+    const itemsMap = new Map();
     for (const row of itemsResult.rows) {
-      if (!gamesMap.has(row.game_key)) {
-        gamesMap.set(row.game_key, { gameKey: row.game_key, gameName: row.game_name, tickets: [] });
+      if (!itemsMap.has(row.booking_item_id)) {
+        itemsMap.set(row.booking_item_id, {
+          bookingItemId: row.booking_item_id,
+          gameKey: row.game_key,
+          gameName: row.game_name,
+          imageUrl: row.image_url,
+          variantLabel: variantLabel(row.mode, row.laps),
+          tickets: [],
+        });
       }
       if (row.ticket_id) {
-        gamesMap.get(row.game_key).tickets.push({
+        itemsMap.get(row.booking_item_id).tickets.push({
           id: row.ticket_id,
           qrToken: row.qr_token,
           status: row.ticket_status,
@@ -143,7 +186,7 @@ router.get('/mine', requireUser, async (req, res) => {
       }
     }
 
-    bookings.push({ ...booking, ticketsByGame: Array.from(gamesMap.values()) });
+    bookings.push({ ...booking, items: Array.from(itemsMap.values()) });
   }
 
   res.json({ bookings });

@@ -13,13 +13,30 @@ function slugify(name) {
 }
 
 router.get('/', async (req, res) => {
-  const result = await query(
-    'SELECT id, key, name, price_per_person, image_url FROM games WHERE is_active = true ORDER BY name'
+  const gamesResult = await query(
+    'SELECT id, key, name, price_per_person, image_url FROM games WHERE is_active = true ORDER BY sort_order, name'
   );
-  res.json({ games: result.rows });
+  const variantsResult = await query(
+    `SELECT id, game_id, mode, laps, price_per_person FROM game_variants
+     WHERE is_active = true ORDER BY mode, laps`
+  );
+
+  const variantsByGameId = new Map();
+  for (const v of variantsResult.rows) {
+    if (!variantsByGameId.has(v.game_id)) variantsByGameId.set(v.game_id, []);
+    variantsByGameId.get(v.game_id).push({
+      id: v.id,
+      mode: v.mode,
+      laps: v.laps,
+      pricePerPerson: v.price_per_person,
+    });
+  }
+
+  const games = gamesResult.rows.map((g) => ({ ...g, variants: variantsByGameId.get(g.id) || [] }));
+  res.json({ games });
 });
 
-// Admin adds a new activity to the catalog
+// Admin adds a new activity to the catalog (flat-priced; variants can be added afterward)
 router.post('/', requireAdmin, async (req, res) => {
   const { name, pricePerPerson, imageUrl } = req.body;
   const price = Number(pricePerPerson);
@@ -38,11 +55,42 @@ router.post('/', requireAdmin, async (req, res) => {
     key = `${baseKey}_${suffix}`;
   }
 
+  const nextSort = await query('SELECT COALESCE(MAX(sort_order), -1) + 1 AS next FROM games');
+
   const result = await query(
-    'INSERT INTO games (key, name, price_per_person, image_url) VALUES ($1, $2, $3, $4) RETURNING id, key, name, price_per_person, image_url',
-    [key, name, price, imageUrl || null]
+    'INSERT INTO games (key, name, price_per_person, image_url, sort_order) VALUES ($1, $2, $3, $4, $5) RETURNING id, key, name, price_per_person, image_url',
+    [key, name, price, imageUrl || null, nextSort.rows[0].next]
   );
-  res.status(201).json({ game: result.rows[0] });
+  res.status(201).json({ game: { ...result.rows[0], variants: [] } });
+});
+
+// Admin adds a priced variant (e.g. mode + lap count) to an existing game
+router.post('/:id/variants', requireAdmin, async (req, res) => {
+  const { mode, laps, pricePerPerson } = req.body;
+  const lapsNum = Number(laps);
+  const price = Number(pricePerPerson);
+
+  if (!mode || !Number.isInteger(lapsNum) || lapsNum <= 0 || !Number.isFinite(price) || price <= 0) {
+    return res.status(400).json({ error: 'mode, a positive integer laps, and a positive pricePerPerson are required' });
+  }
+
+  const gameResult = await query('SELECT id FROM games WHERE id = $1', [req.params.id]);
+  if (!gameResult.rows[0]) return res.status(404).json({ error: 'Game not found' });
+
+  const result = await query(
+    'INSERT INTO game_variants (game_id, mode, laps, price_per_person) VALUES ($1, $2, $3, $4) RETURNING id, mode, laps, price_per_person',
+    [req.params.id, mode, lapsNum, price]
+  );
+  res.status(201).json({ variant: result.rows[0] });
+});
+
+// Admin removes a variant (soft delete — keeps price history for past bookings intact)
+router.delete('/:id/variants/:variantId', requireAdmin, async (req, res) => {
+  await query('UPDATE game_variants SET is_active = false WHERE id = $1 AND game_id = $2', [
+    req.params.variantId,
+    req.params.id,
+  ]);
+  res.json({ ok: true });
 });
 
 module.exports = router;
