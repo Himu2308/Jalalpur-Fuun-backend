@@ -64,21 +64,44 @@ router.post('/', requireAdmin, async (req, res) => {
   res.status(201).json({ game: { ...result.rows[0], variants: [] } });
 });
 
-// Admin removes an activity from the live catalog. This is intentionally a soft
-// delete so existing booking items and tickets keep their activity information.
+// Admin permanently deletes an activity only when it has no booking history.
+// Booked activities are protected because deleting them would break old tickets.
 router.delete('/:id', requireAdmin, async (req, res) => {
-  const result = await query(
-    `UPDATE games
-     SET is_active = false
-     WHERE id = $1 AND is_active = true
-     RETURNING id, key, name`,
+  const existing = await query('SELECT id, key, name FROM games WHERE id = $1', [req.params.id]);
+  if (!existing.rows[0]) return res.status(404).json({ error: 'Activity not found' });
+
+  const bookingCount = await query(
+    'SELECT COUNT(*)::int AS count FROM booking_items WHERE game_id = $1',
     [req.params.id]
   );
+  if (bookingCount.rows[0].count > 0) {
+    return res.status(409).json({
+      error: 'This activity has booking history and cannot be permanently deleted. Existing tickets must be preserved.',
+    });
+  }
 
-  if (!result.rows[0]) return res.status(404).json({ error: 'Activity not found or already removed' });
-
-  await query('UPDATE game_variants SET is_active = false WHERE game_id = $1', [req.params.id]);
+  const result = await query('DELETE FROM games WHERE id = $1 RETURNING id, key, name', [req.params.id]);
   res.json({ ok: true, activity: result.rows[0] });
+});
+
+// Admin edits the customer-facing activity details. The stable key is deliberately
+// not changed because staff roles and historical integrations use it.
+router.patch('/:id', requireAdmin, async (req, res) => {
+  const { name, pricePerPerson, imageUrl } = req.body;
+  const price = Number(pricePerPerson);
+  if (!name || !name.trim() || !Number.isFinite(price) || price <= 0) {
+    return res.status(400).json({ error: 'name and a positive pricePerPerson are required' });
+  }
+
+  const result = await query(
+    `UPDATE games
+     SET name = $1, price_per_person = $2, image_url = $3
+     WHERE id = $4
+     RETURNING id, key, name, price_per_person, image_url`,
+    [name.trim(), price, imageUrl?.trim() || null, req.params.id]
+  );
+  if (!result.rows[0]) return res.status(404).json({ error: 'Activity not found' });
+  res.json({ game: result.rows[0] });
 });
 
 // Admin adds a priced variant (e.g. mode + lap count) to an existing game

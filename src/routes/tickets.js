@@ -13,11 +13,8 @@ router.post('/scan', requireWorkerOrAdmin, async (req, res) => {
   if (!normalizedToken) return res.status(400).json({ error: 'Enter a valid ticket code' });
 
   // The customer ticket displays the final 8 characters as a human-readable fallback.
-  // Only admins may validate using that shortened code; workers must scan the full QR token.
+  // The normal worker role check below still prevents validation for another activity.
   const isShortCode = normalizedToken.length <= 8;
-  if (isShortCode && !req.isAdmin) {
-    return res.status(400).json({ error: 'Staff must scan the full QR code' });
-  }
 
   const result = await query(
     `SELECT t.id, t.status, t.visit_date, g.key AS game_key, g.name AS game_name,
