@@ -9,6 +9,16 @@ router.post('/scan', requireWorkerOrAdmin, async (req, res) => {
   const { qrToken } = req.body;
   if (!qrToken) return res.status(400).json({ error: 'qrToken is required' });
 
+  const normalizedToken = String(qrToken).trim().replace(/^#/, '');
+  if (!normalizedToken) return res.status(400).json({ error: 'Enter a valid ticket code' });
+
+  // The customer ticket displays the final 8 characters as a human-readable fallback.
+  // Only admins may validate using that shortened code; workers must scan the full QR token.
+  const isShortCode = normalizedToken.length <= 8;
+  if (isShortCode && !req.isAdmin) {
+    return res.status(400).json({ error: 'Staff must scan the full QR code' });
+  }
+
   const result = await query(
     `SELECT t.id, t.status, t.visit_date, g.key AS game_key, g.name AS game_name,
             u.name AS customer_name, u.phone AS customer_phone, u.email AS customer_email
@@ -17,9 +27,18 @@ router.post('/scan', requireWorkerOrAdmin, async (req, res) => {
      JOIN games g ON g.id = bi.game_id
      JOIN bookings b ON b.id = bi.booking_id
      JOIN users u ON u.id = b.user_id
-     WHERE t.qr_token = $1`,
-    [qrToken]
+     WHERE ${isShortCode ? 'LOWER(RIGHT(t.qr_token, 8)) = LOWER($1)' : 't.qr_token = $1'}
+     LIMIT 2`,
+    [normalizedToken]
   );
+
+  if (result.rows.length > 1) {
+    return res.status(409).json({
+      ok: false,
+      reason: 'ambiguous_code',
+      message: 'This short code matches multiple tickets. Scan the QR code instead.',
+    });
+  }
   const ticket = result.rows[0];
 
   if (!ticket) {
