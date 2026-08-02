@@ -64,6 +64,23 @@ router.post('/', requireAdmin, async (req, res) => {
   res.status(201).json({ game: { ...result.rows[0], variants: [] } });
 });
 
+// Admin removes an activity from the live catalog. This is intentionally a soft
+// delete so existing booking items and tickets keep their activity information.
+router.delete('/:id', requireAdmin, async (req, res) => {
+  const result = await query(
+    `UPDATE games
+     SET is_active = false
+     WHERE id = $1 AND is_active = true
+     RETURNING id, key, name`,
+    [req.params.id]
+  );
+
+  if (!result.rows[0]) return res.status(404).json({ error: 'Activity not found or already removed' });
+
+  await query('UPDATE game_variants SET is_active = false WHERE game_id = $1', [req.params.id]);
+  res.json({ ok: true, activity: result.rows[0] });
+});
+
 // Admin adds a priced variant (e.g. mode + lap count) to an existing game
 router.post('/:id/variants', requireAdmin, async (req, res) => {
   const { mode, laps, pricePerPerson } = req.body;
