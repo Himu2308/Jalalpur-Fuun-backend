@@ -4,7 +4,7 @@ const { client: redis } = require('../redis');
 
 const SECRET = process.env.JWT_SECRET;
 const USER_TTL_SECONDS = 30 * 24 * 60 * 60; // 30 days
-const WORKER_TTL_SECONDS = 24 * 60 * 60; // 1 day
+const WORKER_TTL_SECONDS = 30 * 24 * 60 * 60; // 30 days
 const ADMIN_TTL_SECONDS = 24 * 60 * 60; // 1 day
 
 function indexKey(kind, id) {
