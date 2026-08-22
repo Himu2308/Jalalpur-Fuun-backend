@@ -1,4 +1,5 @@
-require('dotenv').config();
+const path = require('path');
+require('dotenv').config({ path: path.join(__dirname, '..', '.env') });
 require('express-async-errors');
 const express = require('express');
 const cors = require('cors');
@@ -12,6 +13,7 @@ const gamesRoutes = require('./routes/games');
 const bookingsRoutes = require('./routes/bookings');
 const ticketsRoutes = require('./routes/tickets');
 const staffRoutes = require('./routes/staff');
+const userLogsRoutes = require('./routes/userLogs');
 
 const app = express();
 
@@ -26,6 +28,7 @@ app.use('/games', gamesRoutes);
 app.use('/bookings', bookingsRoutes);
 app.use('/tickets', ticketsRoutes);
 app.use('/staff', staffRoutes);
+app.use('/user-logs', userLogsRoutes);
 
 app.use((err, req, res, next) => {
   console.error(err);

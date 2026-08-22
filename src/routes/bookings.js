@@ -2,7 +2,7 @@ const express = require('express');
 const { nanoid } = require('nanoid');
 const { query } = require('../db');
 const { requireUser } = require('../middleware/auth');
-const { createOrder, verifyPayment } = require('../lib/razorpay');
+const { createOrder, verifyPayment, keyId } = require('../lib/razorpay');
 
 const router = express.Router();
 
@@ -66,7 +66,29 @@ router.post('/', requireUser, async (req, res) => {
     );
   }
 
-  const order = await createOrder({ amount: total, receipt: `booking_${bookingId}` });
+  let order;
+  try {
+    order = await createOrder({ amount: total, receipt: `booking_${bookingId}` });
+  } catch (err) {
+    if (err.code === 'RAZORPAY_CONFIG_MISSING') {
+      return res.status(500).json({ error: 'Payment gateway is not configured' });
+    }
+
+    const gatewayCode = err.error?.code;
+    const gatewayDescription = err.error?.description;
+    if (err.statusCode === 401 || gatewayDescription === 'Authentication failed') {
+      console.error('Razorpay authentication failed. Check RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET.');
+      return res.status(502).json({ error: 'Payment gateway authentication failed' });
+    }
+
+    console.error('Razorpay order creation failed:', {
+      statusCode: err.statusCode,
+      code: gatewayCode,
+      description: gatewayDescription,
+    });
+    return res.status(502).json({ error: 'Payment gateway order creation failed' });
+  }
+
   await query('UPDATE bookings SET razorpay_order_id = $1 WHERE id = $2', [order.id, bookingId]);
 
   res.status(201).json({
@@ -74,7 +96,7 @@ router.post('/', requireUser, async (req, res) => {
     razorpayOrderId: order.id,
     amount: order.amount,
     currency: order.currency,
-    keyId: process.env.RAZORPAY_KEY_ID,
+    keyId,
   });
 });
 
