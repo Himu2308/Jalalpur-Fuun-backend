@@ -15,6 +15,7 @@ const ticketsRoutes = require('./routes/tickets');
 const staffRoutes = require('./routes/staff');
 const userLogsRoutes = require('./routes/userLogs');
 const counterRoutes = require('./routes/counter');
+const attendanceRoutes = require('./routes/attendance');
 
 const app = express();
 
@@ -31,6 +32,7 @@ app.use('/tickets', ticketsRoutes);
 app.use('/staff', staffRoutes);
 app.use('/user-logs', userLogsRoutes);
 app.use('/counter', counterRoutes);
+app.use('/attendance', attendanceRoutes);
 
 app.use((err, req, res, next) => {
   console.error(err);
