@@ -5,7 +5,7 @@
 services:
   # ---------- Backend API (Express) ----------
   - type: web
-    name: jalalpur-fuun-api
+    name: jalalpur-fuun-backend
     runtime: node
     region: singapore
     plan: starter
@@ -37,11 +37,11 @@ services:
       - key: RAZORPAY_KEY_SECRET
         sync: false
       - key: FRONTEND_ORIGIN
-        sync: false                     # e.g. https://jalalpur-fuun-web.onrender.com (no trailing slash)
+        sync: false                     # e.g. https://jalalpur-fuun-frontend.onrender.com (no trailing slash)
 
   # ---------- Frontend (Next.js) ----------
   - type: web
-    name: jalalpur-fuun-web
+    name: jalalpur-fuun-frontend
     repo: https://github.com/Himu2308/Jalalpur-Fuun-frontend
     branch: main
     runtime: node
@@ -53,7 +53,7 @@ services:
       - key: NODE_VERSION
         value: "22"
       - key: NEXT_PUBLIC_API_URL
-        sync: false                     # e.g. https://jalalpur-fuun-api.onrender.com — baked in at build time
+        sync: false                     # e.g. https://jalalpur-fuun-backend.onrender.com — baked in at build time
       - key: NEXT_PUBLIC_GOOGLE_CLIENT_ID
         sync: false                     # same value as the backend's GOOGLE_CLIENT_ID
 
