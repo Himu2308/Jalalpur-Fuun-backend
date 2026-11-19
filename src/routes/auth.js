@@ -68,6 +68,10 @@ router.post('/phone', requireUser, async (req, res) => {
   res.json({ user: result.rows[0] });
 });
 
+function workerJson(worker) {
+  return { id: worker.id, uid: worker.uid, name: worker.name, role: worker.role, canSell: worker.can_sell };
+}
+
 // Worker login: UID only, no password. A worker can only scan tickets for their assigned game.
 router.post('/worker-login', async (req, res) => {
   const { uid } = req.body;
@@ -78,7 +82,14 @@ router.post('/worker-login', async (req, res) => {
   if (!worker) return res.status(401).json({ error: 'Invalid UID' });
 
   const token = await createSession('worker', worker.id, { role: worker.role }, WORKER_TTL_SECONDS);
-  res.json({ token, worker: { id: worker.id, uid: worker.uid, name: worker.name, role: worker.role } });
+  res.json({ token, worker: workerJson(worker) });
+});
+
+// Current worker profile, so the staff app picks up permission changes (e.g. can_sell) without re-login.
+router.get('/worker-me', requireWorker, async (req, res) => {
+  const result = await query('SELECT * FROM staff WHERE id = $1', [req.workerId]);
+  if (!result.rows[0]) return res.status(401).json({ error: 'Worker account no longer exists' });
+  res.json({ worker: workerJson(result.rows[0]) });
 });
 
 router.post('/worker-logout', requireWorker, async (req, res) => {

@@ -5,6 +5,16 @@ const { variantLabel, resolveCart, issueTickets } = require('../lib/bookingHelpe
 
 const router = express.Router();
 
+// Admin can always sell; a worker only when the admin has turned on "can sell" for them (checked live, not from the session).
+async function requireSeller(req, res, next) {
+  if (req.isAdmin) return next();
+  const result = await query('SELECT can_sell FROM staff WHERE id = $1', [req.workerId]);
+  if (!result.rows[0]?.can_sell) {
+    return res.status(403).json({ error: 'You are not allowed to sell tickets. Ask the admin to enable counter sales for you.' });
+  }
+  next();
+}
+
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const PAYMENT_METHODS = new Set(['cash', 'upi', 'split']);
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
@@ -21,7 +31,7 @@ const toPaise = (amount) => Math.round(Number(amount) * 100);
 
 // Walk-in sale at the counter: any logged-in worker, or admin, sells tickets on behalf of a customer
 // who pays cash, UPI (to the park's own UPI QR, recorded manually), or a split of both.
-router.post('/sales', requireWorkerOrAdmin, async (req, res) => {
+router.post('/sales', requireWorkerOrAdmin, requireSeller, async (req, res) => {
   const { items, customer = {}, payment = {}, expectedTotal } = req.body;
 
   const phone = customer.phone ? normalizePhone(customer.phone) : null;
