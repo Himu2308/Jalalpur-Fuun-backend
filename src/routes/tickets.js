@@ -52,6 +52,10 @@ router.post('/scan', requireWorkerOrAdmin, async (req, res) => {
     });
   }
 
+  if (ticket.status === 'cancelled') {
+    return res.status(410).json({ ok: false, reason: 'cancelled', message: 'Ticket cancelled — this ticket was refunded' });
+  }
+
   const isToday = new Date(ticket.visit_date).toDateString() === new Date().toDateString();
   if (!isToday || ticket.status === 'expired') {
     if (ticket.status === 'unused') {
@@ -71,10 +75,18 @@ router.post('/scan', requireWorkerOrAdmin, async (req, res) => {
     workerUid = workerResult.rows[0]?.uid || null;
   }
 
-  await query(
-    "UPDATE tickets SET status = 'used', scanned_by_staff_id = $1, scanned_at = now() WHERE id = $2",
+  // Only flips an unused ticket, so a ticket cancelled (or scanned elsewhere) a moment ago can't slip through.
+  const marked = await query(
+    "UPDATE tickets SET status = 'used', scanned_by_staff_id = $1, scanned_at = now() WHERE id = $2 AND status = 'unused' RETURNING id",
     [req.isAdmin ? null : req.workerId, ticket.id]
   );
+  if (marked.rowCount === 0) {
+    const latest = await query('SELECT status FROM tickets WHERE id = $1', [ticket.id]);
+    if (latest.rows[0]?.status === 'cancelled') {
+      return res.status(410).json({ ok: false, reason: 'cancelled', message: 'Ticket cancelled — this ticket was refunded' });
+    }
+    return res.status(409).json({ ok: false, reason: 'already_used', message: 'Ticket already scanned' });
+  }
 
   await query(
     `INSERT INTO scan_logs

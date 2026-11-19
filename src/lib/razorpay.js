@@ -35,4 +35,24 @@ function verifyPayment({ orderId, paymentId, signature }) {
   return expected === signature;
 }
 
-module.exports = { createOrder, verifyPayment, keyId };
+// Refund part (or all) of a captured payment. amount is in rupees. Resolves to Razorpay's refund
+// object ({ id, status: 'pending' | 'processed' | 'failed', ... }); money reaches the customer in ~5-7 days.
+async function refundPayment({ paymentId, amount, receipt, notes }) {
+  if (!keyId || !keySecret) {
+    const error = new Error('Razorpay credentials are not configured');
+    error.code = 'RAZORPAY_CONFIG_MISSING';
+    throw error;
+  }
+  return instance.payments.refund(paymentId, {
+    amount: Math.round(amount * 100),
+    speed: 'normal',
+    receipt,
+    notes,
+  });
+}
+
+async function fetchRefund(paymentId, refundId) {
+  return instance.payments.fetchRefund(paymentId, refundId);
+}
+
+module.exports = { createOrder, verifyPayment, refundPayment, fetchRefund, keyId };

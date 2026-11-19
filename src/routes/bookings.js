@@ -22,8 +22,8 @@ router.post('/', requireUser, async (req, res) => {
 
   for (const item of resolvedItems) {
     await query(
-      'INSERT INTO booking_items (booking_id, game_id, game_variant_id, quantity) VALUES ($1, $2, $3, $4)',
-      [bookingId, item.gameId, item.variantId, item.quantity]
+      'INSERT INTO booking_items (booking_id, game_id, game_variant_id, quantity, unit_price) VALUES ($1, $2, $3, $4, $5)',
+      [bookingId, item.gameId, item.variantId, item.quantity, item.unitPrice]
     );
   }
 
@@ -99,7 +99,10 @@ router.post('/:id/verify-payment', requireUser, async (req, res) => {
 // List the logged-in user's bookings with their tickets, for a "my bookings" page
 router.get('/mine', requireUser, async (req, res) => {
   const bookingsResult = await query(
-    "SELECT id, visit_date, total_amount, status, created_at FROM bookings WHERE user_id = $1 ORDER BY created_at DESC",
+    `SELECT b.id, b.visit_date, b.total_amount, b.status, b.created_at,
+            (SELECT COALESCE(SUM(r.cash_amount + r.upi_amount + CASE WHEN r.razorpay_status = 'failed' THEN 0 ELSE r.razorpay_amount END), 0)
+               FROM refunds r WHERE r.booking_id = b.id) AS refunded_amount
+     FROM bookings b WHERE b.user_id = $1 ORDER BY b.created_at DESC`,
     [req.userId]
   );
 

@@ -44,7 +44,7 @@ async function resolveCart(items) {
     }
 
     total += pricePerPerson * quantity;
-    resolvedItems.push({ gameId: game.id, variantId, quantity });
+    resolvedItems.push({ gameId: game.id, variantId, quantity, unitPrice: pricePerPerson });
   }
 
   return { total, resolvedItems };

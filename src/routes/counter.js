@@ -107,8 +107,8 @@ router.post('/sales', requireWorkerOrAdmin, requireSeller, async (req, res) => {
 
     for (const item of cart.resolvedItems) {
       await client.query(
-        'INSERT INTO booking_items (booking_id, game_id, game_variant_id, quantity) VALUES ($1, $2, $3, $4)',
-        [bookingId, item.gameId, item.variantId, item.quantity]
+        'INSERT INTO booking_items (booking_id, game_id, game_variant_id, quantity, unit_price) VALUES ($1, $2, $3, $4, $5)',
+        [bookingId, item.gameId, item.variantId, item.quantity, item.unitPrice]
       );
     }
     issuedItems = await issueTickets(client, bookingId, visitDate);
@@ -160,7 +160,11 @@ router.get('/sales', requireWorkerOrAdmin, async (req, res) => {
                JOIN games g ON g.id = bi.game_id
                LEFT JOIN game_variants gv ON gv.id = bi.game_variant_id
               WHERE bi.booking_id = b.id) AS items_summary,
-            (SELECT COALESCE(SUM(bi.quantity), 0) FROM booking_items bi WHERE bi.booking_id = b.id)::int AS ticket_count
+            (SELECT COALESCE(SUM(bi.quantity), 0) FROM booking_items bi WHERE bi.booking_id = b.id)::int AS ticket_count,
+            (SELECT COUNT(*) FROM tickets t JOIN booking_items bi ON bi.id = t.booking_item_id
+              WHERE bi.booking_id = b.id AND t.status = 'cancelled')::int AS cancelled_count,
+            (SELECT COALESCE(SUM(r.cash_amount), 0) FROM refunds r WHERE r.booking_id = b.id) AS refunded_cash,
+            (SELECT COALESCE(SUM(r.upi_amount), 0) FROM refunds r WHERE r.booking_id = b.id) AS refunded_upi
      FROM bookings b
      LEFT JOIN staff s ON s.id = b.sold_by_staff_id
      WHERE b.source = 'counter' AND b.visit_date = COALESCE($1::date, CURRENT_DATE) ${sellerFilter}
@@ -171,13 +175,31 @@ router.get('/sales', requireWorkerOrAdmin, async (req, res) => {
   const totals = result.rows.reduce(
     (acc, row) => ({
       sales: acc.sales + 1,
-      tickets: acc.tickets + row.ticket_count,
+      tickets: acc.tickets + row.ticket_count - row.cancelled_count,
+      cancelledTickets: acc.cancelledTickets + row.cancelled_count,
       total: acc.total + Number(row.total_amount),
       cash: acc.cash + Number(row.cash_amount),
       upi: acc.upi + Number(row.upi_amount),
+      refundedCash: acc.refundedCash + Number(row.refunded_cash),
+      refundedUpi: acc.refundedUpi + Number(row.refunded_upi),
     }),
-    { sales: 0, tickets: 0, total: 0, cash: 0, upi: 0 }
+    { sales: 0, tickets: 0, cancelledTickets: 0, total: 0, cash: 0, upi: 0, refundedCash: 0, refundedUpi: 0 }
   );
+
+  // Admin's full-day view: cash/UPI handed back on *online* bookings also comes out of the counter.
+  totals.onlineRefundedCash = 0;
+  totals.onlineRefundedUpi = 0;
+  if (req.isAdmin && !req.query.seller) {
+    const online = await query(
+      `SELECT COALESCE(SUM(r.cash_amount), 0) AS cash, COALESCE(SUM(r.upi_amount), 0) AS upi
+       FROM refunds r JOIN bookings b ON b.id = r.booking_id
+       WHERE b.source = 'online' AND r.created_at::date = COALESCE($1::date, CURRENT_DATE)`,
+      [date]
+    );
+    totals.onlineRefundedCash = Number(online.rows[0].cash);
+    totals.onlineRefundedUpi = Number(online.rows[0].upi);
+  }
+  for (const key of Object.keys(totals)) totals[key] = Math.round(totals[key] * 100) / 100;
 
   res.json({ sales: result.rows, totals });
 });
