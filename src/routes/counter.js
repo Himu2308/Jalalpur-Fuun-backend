@@ -155,7 +155,7 @@ router.get('/sales', requireWorkerOrAdmin, async (req, res) => {
     `SELECT b.id, b.created_at, b.total_amount, b.payment_method, b.cash_amount, b.upi_amount, b.upi_ref,
             b.customer_name, b.customer_phone, b.customer_email, b.user_id IS NOT NULL AS linked,
             s.uid AS sold_by_uid, s.name AS sold_by_name,
-            (SELECT STRING_AGG(g.name || COALESCE(' (' || INITCAP(gv.mode) || ' · ' || gv.laps || ' laps)', '') || ' × ' || bi.quantity, ', ' ORDER BY bi.id)
+            (SELECT STRING_AGG(g.name || COALESCE(' (' || INITCAP(gv.mode) || ' · ' || gv.laps || ' min)', '') || ' × ' || bi.quantity, ', ' ORDER BY bi.id)
                FROM booking_items bi
                JOIN games g ON g.id = bi.game_id
                LEFT JOIN game_variants gv ON gv.id = bi.game_variant_id

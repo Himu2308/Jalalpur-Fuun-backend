@@ -27,7 +27,7 @@ router.get('/', async (req, res) => {
     variantsByGameId.get(v.game_id).push({
       id: v.id,
       mode: v.mode,
-      laps: v.laps,
+      minutes: v.laps, // column is still named laps; it stores minutes
       pricePerPerson: v.price_per_person,
     });
   }
@@ -104,22 +104,22 @@ router.patch('/:id', requireAdmin, async (req, res) => {
   res.json({ game: result.rows[0] });
 });
 
-// Admin adds a priced variant (e.g. mode + lap count) to an existing game
+// Admin adds a priced variant (mode + ride time in minutes) to an existing game
 router.post('/:id/variants', requireAdmin, async (req, res) => {
-  const { mode, laps, pricePerPerson } = req.body;
-  const lapsNum = Number(laps);
+  const { mode, pricePerPerson } = req.body;
+  const minutes = Number(req.body.minutes ?? req.body.laps);
   const price = Number(pricePerPerson);
 
-  if (!mode || !Number.isInteger(lapsNum) || lapsNum <= 0 || !Number.isFinite(price) || price <= 0) {
-    return res.status(400).json({ error: 'mode, a positive integer laps, and a positive pricePerPerson are required' });
+  if (!mode || !Number.isInteger(minutes) || minutes <= 0 || !Number.isFinite(price) || price <= 0) {
+    return res.status(400).json({ error: 'mode, a positive whole number of minutes, and a positive pricePerPerson are required' });
   }
 
   const gameResult = await query('SELECT id FROM games WHERE id = $1', [req.params.id]);
   if (!gameResult.rows[0]) return res.status(404).json({ error: 'Game not found' });
 
   const result = await query(
-    'INSERT INTO game_variants (game_id, mode, laps, price_per_person) VALUES ($1, $2, $3, $4) RETURNING id, mode, laps, price_per_person',
-    [req.params.id, mode, lapsNum, price]
+    'INSERT INTO game_variants (game_id, mode, laps, price_per_person) VALUES ($1, $2, $3, $4) RETURNING id, mode, laps AS minutes, price_per_person',
+    [req.params.id, mode, minutes, price]
   );
   res.status(201).json({ variant: result.rows[0] });
 });

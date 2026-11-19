@@ -1,10 +1,11 @@
 const { nanoid } = require('nanoid');
 const { query } = require('../db');
 
-function variantLabel(mode, laps) {
+// `minutes` comes from game_variants.laps, which now holds ride time in minutes (see migration 010).
+function variantLabel(mode, minutes) {
   if (!mode) return null;
   const modeLabel = mode.charAt(0).toUpperCase() + mode.slice(1);
-  return `${modeLabel} · ${laps} Laps`;
+  return `${modeLabel} · ${minutes} min`;
 }
 
 // Prices a cart of [{ gameKey, variantId?, quantity }] against the live catalog.

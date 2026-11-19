@@ -17,7 +17,7 @@ const RAZORPAY_EFFECTIVE = "CASE WHEN r.razorpay_status = 'failed' THEN 0 ELSE r
 const refundedSql = (bookingAlias) => `(SELECT COALESCE(SUM(r.cash_amount + r.upi_amount + ${RAZORPAY_EFFECTIVE}), 0)
    FROM refunds r WHERE r.booking_id = ${bookingAlias}.id)`;
 
-const ITEMS_SUMMARY_SQL = `(SELECT STRING_AGG(g.name || COALESCE(' (' || INITCAP(gv.mode) || ' · ' || gv.laps || ' laps)', '') || ' × ' || bi.quantity, ', ' ORDER BY bi.id)
+const ITEMS_SUMMARY_SQL = `(SELECT STRING_AGG(g.name || COALESCE(' (' || INITCAP(gv.mode) || ' · ' || gv.laps || ' min)', '') || ' × ' || bi.quantity, ', ' ORDER BY bi.id)
    FROM booking_items bi
    JOIN games g ON g.id = bi.game_id
    LEFT JOIN game_variants gv ON gv.id = bi.game_variant_id
