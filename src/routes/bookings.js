@@ -1,56 +1,17 @@
 const express = require('express');
-const { nanoid } = require('nanoid');
-const { query } = require('../db');
+const { query, pool } = require('../db');
 const { requireUser } = require('../middleware/auth');
 const { createOrder, verifyPayment, keyId } = require('../lib/razorpay');
+const { variantLabel, resolveCart, issueTickets } = require('../lib/bookingHelpers');
 
 const router = express.Router();
-
-function variantLabel(mode, laps) {
-  if (!mode) return null;
-  const modeLabel = mode.charAt(0).toUpperCase() + mode.slice(1);
-  return `${modeLabel} · ${laps} Laps`;
-}
 
 // Create a booking (multi-game, multi-variant cart) for today's visit date, and a Razorpay order to pay for it
 router.post('/', requireUser, async (req, res) => {
   const { items } = req.body; // [{ gameKey, variantId?, quantity }]
-  if (!Array.isArray(items) || items.length === 0) {
-    return res.status(400).json({ error: 'items must be a non-empty array' });
-  }
-
-  const gamesResult = await query('SELECT id, key, price_per_person FROM games WHERE is_active = true');
-  const gamesByKey = Object.fromEntries(gamesResult.rows.map((g) => [g.key, g]));
-
-  const variantsResult = await query('SELECT id, game_id, price_per_person FROM game_variants WHERE is_active = true');
-  const variantsById = Object.fromEntries(variantsResult.rows.map((v) => [String(v.id), v]));
-  const gameHasVariants = new Set(variantsResult.rows.map((v) => v.game_id));
-
-  let total = 0;
-  const resolvedItems = [];
-  for (const item of items) {
-    const game = gamesByKey[item.gameKey];
-    const quantity = Number(item.quantity);
-    if (!game || !Number.isInteger(quantity) || quantity <= 0) {
-      return res.status(400).json({ error: `Invalid item for gameKey ${item.gameKey}` });
-    }
-
-    let pricePerPerson;
-    let variantId = null;
-    if (gameHasVariants.has(game.id)) {
-      const variant = item.variantId != null ? variantsById[String(item.variantId)] : null;
-      if (!variant || variant.game_id !== game.id) {
-        return res.status(400).json({ error: `A valid variantId is required for ${item.gameKey}` });
-      }
-      variantId = variant.id;
-      pricePerPerson = Number(variant.price_per_person);
-    } else {
-      pricePerPerson = Number(game.price_per_person);
-    }
-
-    total += pricePerPerson * quantity;
-    resolvedItems.push({ gameId: game.id, variantId, quantity });
-  }
+  const cart = await resolveCart(items);
+  if (cart.error) return res.status(400).json({ error: cart.error });
+  const { total, resolvedItems } = cart;
 
   const bookingResult = await query(
     `INSERT INTO bookings (user_id, visit_date, total_amount, status)
@@ -130,37 +91,7 @@ router.post('/:id/verify-payment', requireUser, async (req, res) => {
     [razorpayPaymentId, bookingId]
   );
 
-  const itemsResult = await query(
-    `SELECT bi.id AS booking_item_id, bi.quantity, g.key AS game_key, g.name AS game_name, g.image_url,
-            gv.mode, gv.laps
-     FROM booking_items bi
-     JOIN games g ON g.id = bi.game_id
-     LEFT JOIN game_variants gv ON gv.id = bi.game_variant_id
-     WHERE bi.booking_id = $1`,
-    [bookingId]
-  );
-
-  const items = [];
-  for (const item of itemsResult.rows) {
-    const tickets = [];
-    for (let i = 0; i < item.quantity; i += 1) {
-      const qrToken = nanoid(24);
-      const ticketResult = await query(
-        `INSERT INTO tickets (booking_item_id, qr_token, visit_date, status)
-         VALUES ($1, $2, $3, 'unused') RETURNING id, qr_token`,
-        [item.booking_item_id, qrToken, booking.visit_date]
-      );
-      tickets.push(ticketResult.rows[0]);
-    }
-    items.push({
-      bookingItemId: item.booking_item_id,
-      gameKey: item.game_key,
-      gameName: item.game_name,
-      imageUrl: item.image_url,
-      variantLabel: variantLabel(item.mode, item.laps),
-      tickets,
-    });
-  }
+  const items = await issueTickets(pool, bookingId, booking.visit_date);
 
   res.json({ bookingId, items });
 });

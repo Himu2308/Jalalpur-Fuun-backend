@@ -18,12 +18,14 @@ router.post('/scan', requireWorkerOrAdmin, async (req, res) => {
 
   const result = await query(
     `SELECT t.id, t.status, t.visit_date, g.key AS game_key, g.name AS game_name,
-            u.name AS customer_name, u.phone AS customer_phone, u.email AS customer_email
+            COALESCE(u.name, b.customer_name) AS customer_name,
+            COALESCE(u.phone, b.customer_phone) AS customer_phone,
+            COALESCE(u.email, b.customer_email) AS customer_email
      FROM tickets t
      JOIN booking_items bi ON bi.id = t.booking_item_id
      JOIN games g ON g.id = bi.game_id
      JOIN bookings b ON b.id = bi.booking_id
-     JOIN users u ON u.id = b.user_id
+     LEFT JOIN users u ON u.id = b.user_id -- counter (walk-in) sales may have no app account
      WHERE ${isShortCode ? 'LOWER(RIGHT(t.qr_token, 8)) = LOWER($1)' : 't.qr_token = $1'}
      LIMIT 2`,
     [normalizedToken]

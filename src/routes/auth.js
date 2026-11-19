@@ -9,6 +9,7 @@ const {
   ADMIN_TTL_SECONDS,
 } = require('../lib/sessions');
 const { requireUser, requireWorker, requireAdmin } = require('../middleware/auth');
+const { linkCounterBookings } = require('../lib/bookingHelpers');
 
 const router = express.Router();
 const googleClient = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
@@ -42,6 +43,9 @@ router.post('/google', async (req, res) => {
     user = inserted.rows[0];
   }
 
+  // Tickets bought at the counter with this email/phone before the customer had an account show up now.
+  await linkCounterBookings(user.id, { email: user.email, phone: user.phone });
+
   const token = await createSession('user', user.id, {}, USER_TTL_SECONDS);
   res.json({ token, user: { id: user.id, email: user.email, name: user.name, phone: user.phone } });
 });
@@ -60,6 +64,7 @@ router.post('/phone', requireUser, async (req, res) => {
     'UPDATE users SET phone = $1 WHERE id = $2 RETURNING id, email, name, phone',
     [phone, req.userId]
   );
+  await linkCounterBookings(req.userId, { phone });
   res.json({ user: result.rows[0] });
 });
 
