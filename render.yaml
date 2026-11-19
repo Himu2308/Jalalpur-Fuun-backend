@@ -47,7 +47,7 @@ services:
     runtime: node
     region: singapore
     plan: starter
-    buildCommand: npm ci && npm run build
+    buildCommand: npm install && npm run build   # not npm ci: lockfile from npm 11 trips npm 10's strict check
     startCommand: npm start
     envVars:
       - key: NODE_VERSION
