@@ -1,0 +1,74 @@
+# Render Blueprint for Jalalpur Fuun: backend + frontend + Postgres + Key Value (Redis), all in Singapore.
+# Lives in the backend repo; the frontend service points at the separate frontend repo.
+# Values marked `sync: false` are asked for in the Render dashboard when the Blueprint is first applied.
+
+services:
+  # ---------- Backend API (Express) ----------
+  - type: web
+    name: jalalpur-fuun-api
+    runtime: node
+    region: singapore
+    plan: starter
+    branch: main
+    buildCommand: npm ci
+    preDeployCommand: npm run migrate   # applies migrations/*.sql before each deploy goes live
+    startCommand: npm start
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+      - key: DATABASE_URL
+        fromDatabase:
+          name: jalalpur-fuun-db
+          property: connectionString    # internal URL (same region, no SSL needed)
+      - key: REDIS_URL
+        fromService:
+          type: keyvalue
+          name: jalalpur-fuun-redis
+          property: connectionString
+      - key: JWT_SECRET
+        generateValue: true             # random secret created by Render
+      - key: ADMIN_PASSWORD
+        sync: false
+      - key: GOOGLE_CLIENT_ID
+        sync: false
+      - key: RAZORPAY_KEY_ID
+        sync: false
+      - key: RAZORPAY_KEY_SECRET
+        sync: false
+      - key: FRONTEND_ORIGIN
+        sync: false                     # e.g. https://jalalpur-fuun-web.onrender.com (no trailing slash)
+
+  # ---------- Frontend (Next.js) ----------
+  - type: web
+    name: jalalpur-fuun-web
+    repo: https://github.com/Himu2308/Jalalpur-Fuun-frontend
+    branch: main
+    runtime: node
+    region: singapore
+    plan: starter
+    buildCommand: npm ci && npm run build
+    startCommand: npm start
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+      - key: NEXT_PUBLIC_API_URL
+        sync: false                     # e.g. https://jalalpur-fuun-api.onrender.com — baked in at build time
+      - key: NEXT_PUBLIC_GOOGLE_CLIENT_ID
+        sync: false                     # same value as the backend's GOOGLE_CLIENT_ID
+
+  # ---------- Sessions store ----------
+  - type: keyvalue
+    name: jalalpur-fuun-redis
+    region: singapore
+    plan: starter                       # paid tier keeps data on restart, so nobody gets logged out
+    maxmemoryPolicy: noeviction         # never silently drop sessions
+    ipAllowList: []                     # reachable only from your Render services
+
+databases:
+  - name: jalalpur-fuun-db
+    region: singapore
+    plan: basic-256mb
+    databaseName: jalalpur_fun
+    user: jalalpur
+    ipAllowList: []                     # reachable only from your Render services
