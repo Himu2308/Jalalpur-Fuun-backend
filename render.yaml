@@ -71,4 +71,8 @@ databases:
     plan: basic-256mb
     databaseName: jalalpur_fun
     user: jalalpur
-    ipAllowList: []                     # reachable only from your Render services
+    # Open to any IP (still needs the DB password + SSL), so DBeaver works from any network.
+    # To lock it down again, replace with specific IPs (e.g. 1.2.3.4/32) or [] for Render-only.
+    ipAllowList:
+      - source: 0.0.0.0/0
+        description: Everywhere (password-protected)
