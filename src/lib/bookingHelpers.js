@@ -8,6 +8,18 @@ function variantLabel(mode, minutes) {
   return `${modeLabel} · ${minutes} min`;
 }
 
+// Saturday/Sunday in India time. Tiers with a weekend_price charge it on these days.
+function isWeekendToday(now = new Date()) {
+  const day = new Intl.DateTimeFormat('en-US', { timeZone: 'Asia/Kolkata', weekday: 'short' }).format(now);
+  return day === 'Sat' || day === 'Sun';
+}
+
+// The price a tier costs today.
+function variantPriceToday(variant, weekend = isWeekendToday()) {
+  if (weekend && variant.weekend_price != null) return Number(variant.weekend_price);
+  return Number(variant.price_per_person);
+}
+
 // Prices a cart of [{ gameKey, variantId?, quantity }] against the live catalog.
 // Returns { total, resolvedItems } or { error } with a message suitable for a 400.
 async function resolveCart(items) {
@@ -18,7 +30,8 @@ async function resolveCart(items) {
   const gamesResult = await query('SELECT id, key, price_per_person FROM games WHERE is_active = true');
   const gamesByKey = Object.fromEntries(gamesResult.rows.map((g) => [g.key, g]));
 
-  const variantsResult = await query('SELECT id, game_id, price_per_person FROM game_variants WHERE is_active = true');
+  const variantsResult = await query('SELECT id, game_id, price_per_person, weekend_price FROM game_variants WHERE is_active = true');
+  const weekend = isWeekendToday();
   const variantsById = Object.fromEntries(variantsResult.rows.map((v) => [String(v.id), v]));
   const gameHasVariants = new Set(variantsResult.rows.map((v) => v.game_id));
 
@@ -39,7 +52,7 @@ async function resolveCart(items) {
         return { error: `A valid variantId is required for ${item.gameKey}` };
       }
       variantId = variant.id;
-      pricePerPerson = Number(variant.price_per_person);
+      pricePerPerson = variantPriceToday(variant, weekend);
     } else {
       pricePerPerson = Number(game.price_per_person);
     }
@@ -99,4 +112,4 @@ async function linkCounterBookings(userId, { email, phone }) {
   );
 }
 
-module.exports = { variantLabel, resolveCart, issueTickets, linkCounterBookings };
+module.exports = { variantLabel, resolveCart, issueTickets, linkCounterBookings, isWeekendToday, variantPriceToday };

@@ -64,9 +64,14 @@ CREATE INDEX IF NOT EXISTS idx_booking_items_booking_id ON booking_items(booking
 CREATE INDEX IF NOT EXISTS idx_tickets_booking_item_id ON tickets(booking_item_id);
 CREATE INDEX IF NOT EXISTS idx_tickets_qr_token ON tickets(qr_token);
 
--- Seed a starter catalog (safe to re-run)
-INSERT INTO games (key, name, price_per_person, is_active) VALUES
-  ('gokarting', 'Go Karting', 500.00, true),
-  ('zipline', 'Zipline', 400.00, true),
-  ('ai_cricket', 'AI Cricket', 300.00, true)
+-- Seed a starter catalog, only into a brand-new empty database. (Migrations re-run on every deploy,
+-- so seeding unconditionally would bring back activities the admin deleted on purpose.)
+INSERT INTO games (key, name, price_per_person, is_active)
+SELECT v.key, v.name, v.price, true
+FROM (VALUES
+  ('gokarting', 'Go Karting', 500.00),
+  ('zipline', 'Zipline', 400.00),
+  ('ai_cricket', 'AI Cricket', 300.00)
+) AS v(key, name, price)
+WHERE NOT EXISTS (SELECT 1 FROM games)
 ON CONFLICT (key) DO NOTHING;
